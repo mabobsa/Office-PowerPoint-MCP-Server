@@ -79,12 +79,15 @@ def _render_pdf_to_pngs(pdf_path: str, output_dir: str, dpi: int = 150,
                          slide_numbers: Optional[List[int]] = None) -> List[str]:
     """Render PDF pages to PNG images using PyMuPDF."""
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz  # PyMuPDF >= 1.24.3
     except ImportError:
-        raise RuntimeError(
-            "PyMuPDF not found. Please install it:\n"
-            "  pip install PyMuPDF"
-        )
+        try:
+            import fitz  # older PyMuPDF releases
+        except ImportError:
+            raise RuntimeError(
+                "PyMuPDF not found. Please install it:\n"
+                "  pip install PyMuPDF"
+            )
 
     doc = fitz.open(pdf_path)
     png_paths = []
