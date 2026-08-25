@@ -12,3 +12,7 @@ wheels/
 test/
 .DS_Store
 CLAUDE.md
+
+# Build/export artifacts
+Export/
+*.tar.gz

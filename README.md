@@ -2,7 +2,7 @@
 [![smithery badge](https://smithery.ai/badge/@GongRzhe/Office-PowerPoint-MCP-Server)](https://smithery.ai/server/@GongRzhe/Office-PowerPoint-MCP-Server)
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
 
-A comprehensive MCP (Model Context Protocol) server for PowerPoint manipulation using python-pptx. **Version 2.0** provides 32 powerful tools organized into 11 specialized modules, offering complete PowerPoint creation, management, and professional design capabilities. The server features a modular architecture with enhanced parameter handling, intelligent operation selection, and comprehensive error handling.
+A comprehensive MCP (Model Context Protocol) server for PowerPoint manipulation using python-pptx. **Version 2.0** provides 38 powerful tools organized into 12 specialized modules, offering complete PowerPoint creation, management, and professional design capabilities. The server features a modular architecture with enhanced parameter handling, intelligent operation selection, and comprehensive error handling.
 
 ----
 
@@ -67,6 +67,7 @@ A comprehensive MCP (Model Context Protocol) server for PowerPoint manipulation 
 - **Comprehensive validation** with automatic error fixing
 - **Template search** with configurable directory paths
 - **Professional layout calculations** with margin and spacing management
+- **Slide-to-image export** rendering slides as PNGs for AI visual analysis (requires LibreOffice)
 
 ## Installation
 
@@ -83,6 +84,20 @@ npx -y @smithery/cli install @GongRzhe/Office-PowerPoint-MCP-Server --client cla
 - Python 3.6 or higher (as specified in pyproject.toml)
 - pip package manager
 - Optional: uvx for package execution without local installation
+- Optional: [LibreOffice](https://www.libreoffice.org/) - required **only** for the
+  `export_slides_to_images` tool, which renders slides as PNG images. All other tools
+  work without it.
+
+  ```bash
+  # Debian/Ubuntu
+  sudo apt install libreoffice-impress
+  # macOS
+  brew install --cask libreoffice
+  ```
+
+  For non-English slides, also install matching fonts (e.g. `fonts-noto-cjk`,
+  `fonts-nanum` on Debian/Ubuntu) or text will render as blank boxes in the PNGs.
+  The provided Dockerfile installs LibreOffice and CJK fonts already.
 
 ### Installation Options
 
@@ -194,9 +209,9 @@ If you have `uvx` installed, you can run the server directly from PyPI without l
 
 ## 🚀 What's New in v2.0
 
-### **Comprehensive Tool Suite (32 Tools)**
-- **Complete PowerPoint manipulation** with 34 specialized tools
-- **11 organized modules** covering all aspects of presentation creation
+### **Comprehensive Tool Suite (38 Tools)**
+- **Complete PowerPoint manipulation** with 38 specialized tools
+- **12 organized modules** covering all aspects of presentation creation
 - **Enhanced parameter handling** with comprehensive validation
 - **Intelligent defaults** and operation-based interfaces
 
@@ -208,14 +223,14 @@ If you have `uvx` installed, you can run the server directly from PyPI without l
 - **Complete presentation generation** from template sequences
 
 ### **Modular Architecture**
-- **11 specialized modules**: presentation, content, structural, professional, template, hyperlink, chart, connector, master, and transition tools
+- **12 specialized modules**: presentation, content, structural, professional, template, hyperlink, chart, connector, master, transition, and export tools
 - **Better maintainability** with separated concerns
 - **Easier extensibility** for adding new features
 - **Cleaner code structure** with shared utilities
 
 ## Available Tools
 
-The server provides **34 specialized tools** organized into the following categories:
+The server provides **38 specialized tools** organized into the following categories:
 
 ### **Presentation Management (7 tools)**
 1. **create_presentation** - Create new presentations
@@ -262,6 +277,14 @@ The server provides **34 specialized tools** organized into the following catego
 32. **add_connector** - Add connector lines/arrows between points on slides
 33. **update_chart_data** - Replace existing chart data with new categories and series
 34. **manage_slide_transitions** - Basic slide transition management
+
+### **Export (1 tool)**
+35. **export_slides_to_images** - ✨ **NEW** Render slides as PNG images for AI visual analysis (requires LibreOffice)
+
+### **Utility (3 tools)**
+36. **list_presentations** - List all currently loaded presentations
+37. **switch_presentation** - Switch the active presentation by ID
+38. **get_server_info** - Get server name, version, and capability information
 
 ## 🌟 Key Unified Tools
 
@@ -761,6 +784,39 @@ result = use_mcp_tool(
 )
 ```
 
+### Exporting Slides as Images for Visual Analysis (v2.0.8)
+
+```python
+# Export every slide of the current presentation as PNG
+result = use_mcp_tool(
+    server_name="ppt",
+    tool_name="export_slides_to_images",
+    arguments={
+        "output_dir": "./slide_images",
+        "dpi": 150
+    }
+)
+# -> {"total_slides_exported": 5, "output_dir": "...",
+#     "slides": [{"file_path": ".../slide_001.png", ...}, ...]}
+
+# Export only specific slides from a file on disk, at print resolution
+result = use_mcp_tool(
+    server_name="ppt",
+    tool_name="export_slides_to_images",
+    arguments={
+        "file_path": "presentation.pptx",
+        "slide_numbers": [1, 3, 5],
+        "dpi": 300
+    }
+)
+```
+
+The tool converts `PPTX -> PDF` with headless LibreOffice, then renders one PNG per
+slide with PyMuPDF. It returns file paths by default so the response stays small;
+pass `include_base64: True` only when the image bytes are needed inline. Point an
+AI vision model at the returned paths to review the rendered layout - text overflow,
+overlapping shapes, chart legibility - which text extraction alone cannot reveal.
+
 ## Template Support
 
 ### Working with Templates
@@ -896,7 +952,7 @@ Templates automatically adjust to content:
 Office-PowerPoint-MCP-Server/
 ├── ppt_mcp_server.py          # Main consolidated server (v2.0)
 ├── slide_layout_templates.json # 25+ professional slide templates with dynamic features
-├── tools/                     # 11 specialized tool modules (32 tools total)
+├── tools/                     # 12 specialized tool modules (35 tools total)
 │   ├── __init__.py
 │   ├── presentation_tools.py  # Presentation management (7 tools)
 │   ├── content_tools.py       # Content & slides (6 tools)
@@ -907,7 +963,8 @@ Office-PowerPoint-MCP-Server/
 │   ├── chart_tools.py         # Advanced chart operations (1 tool)
 │   ├── connector_tools.py     # Connector lines/arrows (1 tool)
 │   ├── master_tools.py        # Slide master management (1 tool)
-│   └── transition_tools.py    # Slide transitions (1 tool)
+│   ├── transition_tools.py    # Slide transitions (1 tool)
+│   └── export_tools.py        # Slide-to-image export (1 tool)
 ├── utils/                     # 7 organized utility modules (68+ functions)
 │   ├── __init__.py
 │   ├── core_utils.py          # Error handling & safe operations
@@ -925,9 +982,9 @@ Office-PowerPoint-MCP-Server/
 
 ### **Modular Design**
 - **7 focused utility modules** with clear responsibilities
-- **11 organized tool modules** for comprehensive coverage
+- **12 organized tool modules** for comprehensive coverage
 - **68+ utility functions** organized by functionality
-- **32 MCP tools** covering all PowerPoint manipulation needs
+- **38 MCP tools** covering all PowerPoint manipulation needs
 - **Clear separation of concerns** for easier development
 
 ### **Code Organization**
