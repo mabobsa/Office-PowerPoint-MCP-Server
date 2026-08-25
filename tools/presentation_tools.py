@@ -9,7 +9,7 @@ from mcp.types import ToolAnnotations
 import utils as ppt_utils
 
 
-def register_presentation_tools(app: FastMCP, presentations: Dict, get_current_presentation_id, get_template_search_directories):
+def register_presentation_tools(app: FastMCP, presentations: Dict, get_current_presentation_id, get_template_search_directories, set_current_presentation_id):
     """Register presentation management tools with the FastMCP app"""
     
     @app.tool(
@@ -28,7 +28,7 @@ def register_presentation_tools(app: FastMCP, presentations: Dict, get_current_p
         
         # Store the presentation
         presentations[id] = pres
-        # Set as current presentation (this would need to be handled by caller)
+        set_current_presentation_id(id)
         
         return {
             "presentation_id": id,
@@ -74,6 +74,7 @@ def register_presentation_tools(app: FastMCP, presentations: Dict, get_current_p
         
         # Store the presentation
         presentations[id] = pres
+        set_current_presentation_id(id)
         
         return {
             "presentation_id": id,
@@ -111,6 +112,7 @@ def register_presentation_tools(app: FastMCP, presentations: Dict, get_current_p
         
         # Store the presentation
         presentations[id] = pres
+        set_current_presentation_id(id)
         
         return {
             "presentation_id": id,

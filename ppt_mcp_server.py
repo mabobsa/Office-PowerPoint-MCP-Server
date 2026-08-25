@@ -207,31 +207,13 @@ class PresentationManager:
 # Create presentation manager wrapper
 presentation_manager = PresentationManager(presentations)
 
-# Wrapper functions to handle state management
-def create_presentation_wrapper(original_func):
-    """Wrapper to handle presentation creation with state management."""
-    def wrapper(*args, **kwargs):
-        result = original_func(*args, **kwargs)
-        if "presentation_id" in result and result["presentation_id"] in presentations:
-            set_current_presentation_id(result["presentation_id"])
-        return result
-    return wrapper
-
-def open_presentation_wrapper(original_func):
-    """Wrapper to handle presentation opening with state management."""
-    def wrapper(*args, **kwargs):
-        result = original_func(*args, **kwargs)
-        if "presentation_id" in result and result["presentation_id"] in presentations:
-            set_current_presentation_id(result["presentation_id"])
-        return result
-    return wrapper
-
 # Register all tool modules
 register_presentation_tools(
     app, 
     presentations, 
     get_current_presentation_id, 
-    get_template_search_directories
+    get_template_search_directories,
+    set_current_presentation_id
 )
 
 register_content_tools(
