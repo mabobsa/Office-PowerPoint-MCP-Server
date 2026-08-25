@@ -1,9 +1,18 @@
 """
 Export tools for PowerPoint MCP Server.
-Converts presentation slides to images (PNG) via LibreOffice PDF conversion + PyMuPDF rendering.
+Converts presentation slides to images (PNG).
+
+Two rendering back ends are used, selected by platform:
+- Windows: the PowerPoint COM automation API (Presentation slides are exported
+  directly to PNG). PowerPoint is already required to be installed there and it
+  renders the deck exactly like PowerPoint does.
+- Everything else (Linux, Docker, macOS, WSL): LibreOffice PDF conversion +
+  PyMuPDF rendering, which is the original and only portable route.
+
 Enables AI to visually analyze slide content including layout, charts, shapes, and images.
 """
 import os
+import sys
 import subprocess
 import tempfile
 import base64
@@ -14,7 +23,11 @@ from mcp.types import ToolAnnotations
 
 
 def _find_libreoffice() -> Optional[str]:
-    """Find LibreOffice executable path."""
+    """Find LibreOffice executable path.
+
+    Only used on non-Windows platforms; Windows exports through PowerPoint COM
+    and never reaches this function.
+    """
     candidates = [
         "libreoffice",
         "soffice",
@@ -32,7 +45,11 @@ def _find_libreoffice() -> Optional[str]:
 
 
 def _convert_pptx_to_pdf(pptx_path: str, output_dir: str) -> str:
-    """Convert PPTX to PDF using LibreOffice headless mode."""
+    """Convert PPTX to PDF using LibreOffice headless mode.
+
+    Only used on non-Windows platforms; Windows exports through PowerPoint COM
+    and never reaches this function.
+    """
     libreoffice_path = _find_libreoffice()
     if not libreoffice_path:
         raise RuntimeError(
@@ -112,6 +129,143 @@ def _render_pdf_to_pngs(pdf_path: str, output_dir: str, dpi: int = 150,
     return png_paths
 
 
+def _same_file_path(left: str, right: str) -> bool:
+    """Compare two Windows paths for equality without touching the file system."""
+    return os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right))
+
+
+def _find_open_presentation(app, pptx_path: str):
+    """Return an already-open presentation for pptx_path, or None.
+
+    PowerPoint runs as a single instance per user, so a deck the user already has
+    open shows up in our automation session too. Reusing that object instead of
+    opening a second copy is what keeps us from closing the user's document at
+    cleanup time.
+    """
+    try:
+        count = app.Presentations.Count
+    except Exception:
+        return None
+
+    for index in range(1, count + 1):
+        try:
+            candidate = app.Presentations.Item(index)
+            full_name = candidate.FullName
+        except Exception:
+            continue
+        if full_name and _same_file_path(full_name, pptx_path):
+            return candidate
+    return None
+
+
+def _export_via_powerpoint_com(pptx_path: str, output_dir: str, dpi: int = 150,
+                               slide_numbers: Optional[List[int]] = None) -> List[str]:
+    """Export slides to PNG through the PowerPoint COM automation API (Windows only).
+
+    Deliberately conservative about the user's own PowerPoint session:
+    - Attaches to a running instance instead of fighting it for the single-instance
+      server, and only launches PowerPoint when nothing is running.
+    - Opens our deck read-only and window-less so it neither steals focus nor
+      modifies the source file.
+    - Only closes the presentation we opened ourselves, and only quits the
+      application we started ourselves, and even then only when no other
+      presentation is left open.
+    """
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        raise RuntimeError(
+            "pywin32 not found. Windows slide export uses the PowerPoint COM API.\n"
+            "  pip install pywin32"
+        )
+
+    pptx_path = os.path.abspath(pptx_path)
+    output_dir = os.path.abspath(output_dir)
+
+    pythoncom.CoInitialize()
+    app = None
+    presentation = None
+    started_powerpoint = False
+    opened_presentation = False
+    try:
+        try:
+            app = win32com.client.GetActiveObject("PowerPoint.Application")
+        except pythoncom.com_error:
+            try:
+                app = win32com.client.Dispatch("PowerPoint.Application")
+            except pythoncom.com_error as e:
+                raise RuntimeError(
+                    "Failed to start Microsoft PowerPoint through COM. PowerPoint must be "
+                    f"installed to export slides on Windows.\nCOM error: {e}"
+                )
+            started_powerpoint = True
+
+        try:
+            presentation = _find_open_presentation(app, pptx_path)
+            if presentation is None:
+                try:
+                    presentation = app.Presentations.Open(
+                        pptx_path,
+                        ReadOnly=True,
+                        Untitled=False,
+                        WithWindow=False,
+                    )
+                except pythoncom.com_error as e:
+                    raise RuntimeError(
+                        f"PowerPoint could not open the presentation: {pptx_path}\n"
+                        f"The file may be corrupted, password protected, or not a "
+                        f"PowerPoint document.\nCOM error: {e}"
+                    )
+                opened_presentation = True
+
+            slide_count = presentation.Slides.Count
+            page_setup = presentation.PageSetup
+            width_px = max(1, int(round(float(page_setup.SlideWidth) * dpi / 72.0)))
+            height_px = max(1, int(round(float(page_setup.SlideHeight) * dpi / 72.0)))
+
+            png_paths = []
+            for slide_num in range(1, slide_count + 1):
+                if slide_numbers and slide_num not in slide_numbers:
+                    continue
+
+                png_filename = f"slide_{slide_num:03d}.png"
+                png_path = os.path.join(output_dir, png_filename)
+                presentation.Slides.Item(slide_num).Export(
+                    png_path, "PNG", width_px, height_px
+                )
+                if not os.path.exists(png_path):
+                    raise RuntimeError(
+                        f"PowerPoint reported success but no image was written for slide "
+                        f"{slide_num}. Expected: {png_path}"
+                    )
+                png_paths.append(png_path)
+
+            return png_paths
+        except pythoncom.com_error as e:
+            raise RuntimeError(f"PowerPoint COM export failed: {e}")
+    finally:
+        # Best effort cleanup: never let a teardown failure mask the real error or
+        # skip CoUninitialize, but never leave an orphaned PowerPoint process either.
+        try:
+            if presentation is not None and opened_presentation:
+                try:
+                    presentation.Close()
+                except Exception:
+                    pass
+            presentation = None
+
+            if app is not None and started_powerpoint:
+                try:
+                    if app.Presentations.Count == 0:
+                        app.Quit()
+                except Exception:
+                    pass
+            app = None
+        finally:
+            pythoncom.CoUninitialize()
+
+
 def register_export_tools(app: FastMCP, presentations: Dict, get_current_presentation_id):
     """Register export tools with the FastMCP app"""
 
@@ -135,11 +289,15 @@ def register_export_tools(app: FastMCP, presentations: Dict, get_current_present
         analyze the full slide layout including text positioning, charts, shapes,
         images, and design elements.
 
-        Process: PPTX -> PDF (via LibreOffice) -> PNG per slide (via PyMuPDF)
+        Process depends on the platform:
+        - Windows: PPTX -> PNG per slide directly (via the PowerPoint COM API)
+        - Other platforms: PPTX -> PDF (via LibreOffice) -> PNG per slide (via PyMuPDF)
 
         Prerequisites:
-        - LibreOffice must be installed (sudo apt install libreoffice)
-        - PyMuPDF must be installed (pip install PyMuPDF)
+        - Windows: Microsoft PowerPoint and pywin32 (pip install pywin32).
+          LibreOffice is not used and does not need to be installed.
+        - Other platforms: LibreOffice (sudo apt install libreoffice) and
+          PyMuPDF (pip install PyMuPDF)
 
         Args:
             file_path: Path to a PPTX file on disk. If not provided, uses the
@@ -196,11 +354,18 @@ def register_export_tools(app: FastMCP, presentations: Dict, get_current_present
             output_dir = tempfile.mkdtemp(prefix="pptx_slides_")
 
         try:
-            with tempfile.TemporaryDirectory(prefix="pptx_pdf_") as pdf_dir:
-                pdf_path = _convert_pptx_to_pdf(pptx_path, pdf_dir)
-                png_paths = _render_pdf_to_pngs(
-                    pdf_path, output_dir, dpi=dpi, slide_numbers=slide_numbers
+            if sys.platform == "win32":
+                renderer = "powerpoint-com"
+                png_paths = _export_via_powerpoint_com(
+                    pptx_path, output_dir, dpi=dpi, slide_numbers=slide_numbers
                 )
+            else:
+                renderer = "libreoffice+pymupdf"
+                with tempfile.TemporaryDirectory(prefix="pptx_pdf_") as pdf_dir:
+                    pdf_path = _convert_pptx_to_pdf(pptx_path, pdf_dir)
+                    png_paths = _render_pdf_to_pngs(
+                        pdf_path, output_dir, dpi=dpi, slide_numbers=slide_numbers
+                    )
 
             if not png_paths:
                 return {
@@ -230,6 +395,7 @@ def register_export_tools(app: FastMCP, presentations: Dict, get_current_present
                 "message": f"Successfully exported {len(png_paths)} slide(s) as PNG images",
                 "source": source_description,
                 "output_dir": output_dir,
+                "renderer": renderer,
                 "dpi": dpi,
                 "total_slides_exported": len(png_paths),
                 "total_size_bytes": total_size,
